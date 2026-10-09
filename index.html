@@ -130,10 +130,10 @@
 
           <!-- Save Name Form -->
           <div id="saveScoreBox" class="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
-            <span class="text-xs text-slate-300 font-bold text-left">🏆 登上高分榜</span>
+            <span class="text-xs text-slate-300 font-bold text-left">🏆 紀錄到 localStorage 排行榜</span>
             <div class="flex gap-2">
               <input type="text" id="playerNameInput" maxlength="10" placeholder="輸入玩家名字..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-cyan-500">
-              <button onclick="saveLeaderboardScore()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg transition active:scale-95">
+              <button id="saveScoreBtn" onclick="saveLeaderboardScore()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg transition active:scale-95">
                 紀錄
               </button>
             </div>
@@ -198,25 +198,20 @@
   </div>
 
   <script>
-    // Teachable Machine Pose Model URL
     const MODEL_URL = "https://teachablemachine.withgoogle.com/models/UzqfJGlvo/";
 
-    // AI & Pose variables
     let model, webcam;
     let isWebcamReady = false;
 
-    // Game Core States: IDLE, CASTING, WAITING, TIMING, RESULT, END
     let gameState = "IDLE";
     let score = 0;
     let highScore = 0;
     let cooldown = false;
 
-    // 30 Seconds Countdown Timer
     let timeLeft = 30;
     let timerInterval = null;
     let roundStarted = false;
 
-    // Fish Rarity Database
     const fishDatabase = [
       { name: "小青魚", score: 100, color: "#38bdf8", bellyColor: "#93c5fd", size: 26 },
       { name: "小丑魚", score: 250, color: "#f97316", bellyColor: "#fef08a", size: 30 },
@@ -224,16 +219,13 @@
     ];
     let currentBitingFish = null;
 
-    // Timing Bar Parameters (Generous & Forgiving)
     let pointerPos = 0;
-    let pointerSpeed = 0.007; // Smooth slow speed
+    let pointerSpeed = 0.007;
     let pointerDirection = 1;
 
-    // Target parameters for timing bar
-    const visualTarget = { start: 0.35, end: 0.65 };   // Green visual bar (30% wide)
-    const logicalHitbox = { start: 0.20, end: 0.80 };  // Wide generous hit zone (60% wide)
+    const visualTarget = { start: 0.35, end: 0.65 };   
+    const logicalHitbox = { start: 0.20, end: 0.80 };  
 
-    // Elements
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const statusBadge = document.getElementById("statusBadge");
@@ -243,27 +235,23 @@
     const highScoreText = document.getElementById("highScoreText");
     const timerText = document.getElementById("timerText");
 
-    // Dynamic Physics & Visual Objects
     let canvasW = 800;
     let canvasH = 500;
     
-    // Water & Environment Animation State
     let waveOffset = 0;
     let clouds = [];
     let particles = [];
     let backgroundFish = [];
 
-    // Rod & Reel Animation Object
     const fishingRod = {
-      angle: -0.1,         // Base rod tilt angle
+      angle: -0.1,
       targetAngle: -0.1,
-      bend: 0,             // Rod bend factor when tension is high
+      bend: 0,
       targetBend: 0,
       tipX: 0,
       tipY: 0
     };
 
-    // Fishing Line & Float Bobber Object
     const bobber = {
       x: 520,
       y: 350,
@@ -273,7 +261,6 @@
       visible: false
     };
 
-    // Caught or Target Fish Object
     const activeFish = {
       x: 0,
       y: 0,
@@ -283,10 +270,9 @@
       size: 32,
       data: null,
       visible: false,
-      state: "swimming" // swimming, caught, fleeing
+      state: "swimming"
     };
 
-    // Resize canvas dynamically
     function resizeCanvas() {
       const rect = canvas.getBoundingClientRect();
       canvas.width = rect.width;
@@ -298,7 +284,6 @@
     resizeCanvas();
 
     function initEnvironment() {
-      // Create random drifting clouds
       clouds = [];
       for (let i = 0; i < 5; i++) {
         clouds.push({
@@ -309,7 +294,6 @@
         });
       }
 
-      // Ambient fish swimming in deep sea
       backgroundFish = [];
       for (let i = 0; i < 4; i++) {
         backgroundFish.push({
@@ -323,6 +307,17 @@
     }
     initEnvironment();
 
+    // 頁面初次載入：自動從 localStorage 載入歷史高分與排行榜
+    function loadInitialLeaderboard() {
+      const board = JSON.parse(localStorage.getItem("tm_fishing_leaderboard") || "[]");
+      if (board.length > 0) {
+        highScore = board[0].score;
+        highScoreText.innerText = highScore + " 分";
+      }
+      renderLeaderboardUI();
+    }
+    loadInitialLeaderboard();
+
     async function initGame() {
       document.getElementById("startOverlay").style.display = "none";
       updateStatus("載入 AI 姿勢模型與開啟攝影機中...", "fa-circle-notch fa-spin text-amber-400");
@@ -331,17 +326,14 @@
         const modelURL = MODEL_URL + "model.json";
         const metadataURL = MODEL_URL + "metadata.json";
 
-        // Load Pose Model
         model = await tmPose.load(modelURL, metadataURL);
 
-        // Setup Teachable Machine Webcam
         const size = 180;
         const flip = true; 
         webcam = new tmPose.Webcam(size, size, flip);
         await webcam.setup();
         await webcam.play();
 
-        // Attach webcam canvas to DOM
         const webcamBox = document.getElementById("webcamContainer");
         webcamBox.innerHTML = "";
         webcamBox.appendChild(webcam.canvas);
@@ -351,7 +343,6 @@
 
         updateStatus("做出【THROW (甩竿)】動作開始 30 秒挑戰！", "fa-bullseye text-cyan-400");
 
-        // Start render loops
         requestAnimationFrame(gameLoop);
         predictLoop();
 
@@ -363,7 +354,6 @@
       }
     }
 
-    // Start 30s Countdown Clock
     function startCountdownTimer() {
       if (roundStarted) return;
       roundStarted = true;
@@ -428,9 +418,8 @@
     function handleAction(action) {
       if (cooldown || gameState === "END") return;
 
-      // 1. Throwing / Casting state trigger
       if (gameState === "IDLE" && (action.includes("throw") || action === "space")) {
-        startCountdownTimer(); // Trigger 30s timer on first cast
+        startCountdownTimer();
 
         gameState = "CASTING";
         updateStatus("甩竿投擲中...", "fa-paper-plane text-cyan-400");
@@ -452,7 +441,6 @@
           gameState = "WAITING";
           updateStatus("釣線已拋出，耐心等待魚兒咬鉤...", "fa-hourglass-half text-amber-300 animate-pulse");
 
-          // Pick random fish
           currentBitingFish = fishDatabase[Math.floor(Math.random() * fishDatabase.length)];
 
           const waitTime = 1500 + Math.random() * 1800;
@@ -465,18 +453,18 @@
         }, 800);
       }
 
-      // 2. Up / Catching state trigger
       if (gameState === "TIMING" && (action.includes("up") || action === "space")) {
         triggerCooldown(600);
 
         if (pointerPos >= logicalHitbox.start && pointerPos <= logicalHitbox.end) {
-          // SUCCESS!
           gameState = "RESULT";
           score += currentBitingFish.score;
-          if (score > highScore) highScore = score;
+          if (score > highScore) {
+            highScore = score;
+            highScoreText.innerText = highScore + " 分";
+          }
 
           scoreText.innerText = score + " 分";
-          highScoreText.innerText = highScore + " 分";
 
           fishingRod.targetAngle = -0.4;
           fishingRod.targetBend = 0.6;
@@ -485,7 +473,6 @@
           updateStatus(`🎉 成功釣起【${currentBitingFish.name}】(+${currentBitingFish.score}分)!`, "fa-trophy text-amber-300");
 
         } else {
-          // MISSED!
           gameState = "RESULT";
           fishingRod.targetAngle = -0.2;
           fishingRod.targetBend = -0.1;
@@ -548,19 +535,28 @@
       document.getElementById("finalScoreVal").innerText = `${score} 分`;
       document.getElementById("saveScoreBox").style.display = "flex";
       renderLeaderboardUI();
-      document.getElementById("resultModal").style.display = "flex";
+      document.getElementById("resultModal").style.display = "flex flex-col";
+      document.getElementById("resultModal").classList.remove("hidden");
     }
 
+    // 將成績寫入 localStorage 並且重新排序
     function saveLeaderboardScore() {
       const name = document.getElementById("playerNameInput").value.trim() || "匿名釣客";
       let board = JSON.parse(localStorage.getItem("tm_fishing_leaderboard") || "[]");
 
       board.push({ name, score, date: new Date().toLocaleDateString() });
       board.sort((a, b) => b.score - a.score);
-      board = board.slice(0, 5); // Keep Top 5
+      board = board.slice(0, 5); // 保留前五名
 
       localStorage.setItem("tm_fishing_leaderboard", JSON.stringify(board));
       document.getElementById("saveScoreBox").style.display = "none";
+      
+      // 更新畫面上方的最高紀錄
+      if (board.length > 0) {
+        highScore = board[0].score;
+        highScoreText.innerText = highScore + " 分";
+      }
+
       renderLeaderboardUI();
     }
 
@@ -574,7 +570,7 @@
       }
 
       listContainer.innerHTML = board.map((item, index) => `
-        <div class="flex justify-between items-center py-1 px-2 rounded bg-slate-900 border border-slate-800">
+        <div class="flex justify-between items-center py-1.5 px-2.5 rounded bg-slate-900 border border-slate-800">
           <span class="font-bold ${index === 0 ? 'text-amber-400' : 'text-slate-300'}">
             #${index + 1} ${item.name}
           </span>
@@ -592,6 +588,7 @@
       timerText.innerText = "30 秒";
       bobber.visible = false;
       activeFish.visible = false;
+      document.getElementById("resultModal").classList.add("hidden");
       document.getElementById("resultModal").style.display = "none";
       updateStatus("做出【THROW (甩竿)】動作開始 30 秒挑戰！", "fa-bullseye text-cyan-400");
     }
