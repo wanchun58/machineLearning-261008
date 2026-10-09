@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teachable Machine 體感釣魚大冒險</title>
+  <!-- Load TensorFlow.js and Teachable Machine Pose libraries with tested compatible versions -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8.6/dist/teachablemachine-pose.min.js"></script>
+  <!-- FontAwesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Noto+Sans+TC:wght@500;700;900&display=swap');
+
+    body {
+      font-family: 'Outfit', 'Noto Sans TC', sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      touch-action: manipulation;
+    }
+
+    .game-shadow {
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(14, 165, 233, 0.2);
+    }
+
+    /* Custom glowing text effects */
+    .glow-text {
+      text-shadow: 0 0 10px rgba(56, 189, 248, 0.6), 0 0 20px rgba(56, 189, 248, 0.3);
+    }
+
+    /* Flip webcam preview horizontally */
+    #webcamContainer canvas {
+      width: 100% !important;
+      height: 120px !important;
+      object-fit: cover;
+      border-radius: 0.5rem;
+      transform: scaleX(-1);
+    }
+
+    /* Custom Scrollbar for Leaderboard */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #0284c7;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 bg-slate-950 select-none">
+
+  <!-- Main Container -->
+  <div class="relative w-full max-w-4xl bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 game-shadow flex flex-col">
+    
+    <!-- Top Header & Controls Bar -->
+    <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 z-20">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white font-black shadow-lg shadow-cyan-500/30">
+          <i class="fa-solid font-bold fa-fish-fins text-lg"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-black tracking-wide bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-300 bg-clip-text text-transparent">
+            體感釣魚大冒險
+          </h1>
+          <p class="text-xs text-slate-400 font-medium">Teachable Machine Pose AI</p>
+        </div>
+      </div>
+
+      <!-- Score, Timer & Catch Stats -->
+      <div class="flex items-center gap-3 sm:gap-4 bg-slate-800/80 px-4 py-1.5 rounded-xl border border-slate-700/50">
+        <div class="text-center">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">剩餘時間</div>
+          <div id="timerText" class="text-base font-extrabold text-rose-400">30 秒</div>
+        </div>
+        <div class="h-6 w-px bg-slate-700"></div>
+        <div class="text-center">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">捕獲得分</div>
+          <div id="scoreText" class="text-base font-extrabold text-amber-400">0 分</div>
+        </div>
+        <div class="h-6 w-px bg-slate-700"></div>
+        <div class="text-center">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">最高紀錄</div>
+          <div id="highScoreText" class="text-base font-extrabold text-cyan-400">0 分</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Canvas Playfield Wrap -->
+    <div class="relative w-full aspect-[16/10] sm:aspect-[16/9] bg-sky-300 overflow-hidden">
+      
+      <!-- Top Center Status Banner -->
+      <div class="absolute top-4 left-1/2 -translate-x-1/2 z-20 max-w-[85%] text-center">
+        <div id="statusBadge" class="px-5 py-2.5 rounded-full bg-slate-900/85 backdrop-blur-md border border-cyan-500/30 text-white font-bold text-sm sm:text-base shadow-xl transition-all duration-300 flex items-center gap-2 justify-center">
+          <i class="fa-solid fa-camera text-cyan-400 animate-pulse"></i>
+          <span>點擊「開啟相機」開始遊玩！</span>
+        </div>
+      </div>
+
+      <!-- Start Overlay Button -->
+      <div id="startOverlay" class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6 text-center">
+        <div class="w-20 h-20 mb-4 rounded-3xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white text-3xl shadow-2xl shadow-cyan-500/50 animate-bounce">
+          <i class="fa-solid fa-stopwatch"></i>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-black text-white mb-2 glow-text">30 秒極限體感釣魚</h2>
+        <p class="text-slate-300 max-w-md text-sm mb-6 leading-relaxed">
+          請確保攝像頭正常開啟！做出 <span class="text-cyan-300 font-bold">THROW (甩竿)</span> 啟動 30 秒倒數，當魚咬鉤時，於綠區做出 <span class="text-emerald-300 font-bold">UP (提竿)</span> 成功收線衝高分！
+        </p>
+        <button id="startBtn" onclick="initGame()" class="px-8 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-lg shadow-lg shadow-cyan-500/40 hover:scale-105 active:scale-95 transition-all">
+          <i class="fa-solid fa-play mr-2"></i>開啟相機與 AI 模型
+        </button>
+      </div>
+
+      <!-- Result & Leaderboard Overlay Modal -->
+      <div id="resultModal" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-40 hidden flex-col items-center justify-center p-4 sm:p-6 text-center">
+        <div class="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-5 shadow-2xl flex flex-col gap-4">
+          <div>
+            <div class="inline-flex p-3 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-2xl mb-2">
+              <i class="fa-solid fa-trophy"></i>
+            </div>
+            <h2 class="text-xl sm:text-2xl font-black text-white">30 秒挑戰結束！</h2>
+            <p class="text-xs text-slate-400">你的最終成績</p>
+            <div id="finalScoreVal" class="text-3xl sm:text-4xl font-black text-cyan-400 my-1">0 分</div>
+          </div>
+
+          <!-- Save Name Form -->
+          <div id="saveScoreBox" class="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
+            <span class="text-xs text-slate-300 font-bold text-left">🏆 登上高分榜</span>
+            <div class="flex gap-2">
+              <input type="text" id="playerNameInput" maxlength="10" placeholder="輸入玩家名字..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-cyan-500">
+              <button onclick="saveLeaderboardScore()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg transition active:scale-95">
+                紀錄
+              </button>
+            </div>
+          </div>
+
+          <!-- Leaderboard Top 5 Table -->
+          <div class="flex flex-col gap-1 text-left">
+            <span class="text-xs text-slate-400 font-bold uppercase tracking-wider">排行榜 Top 5</span>
+            <div id="leaderboardList" class="bg-slate-950/80 rounded-xl border border-slate-800/80 p-2 max-h-36 overflow-y-auto flex flex-col gap-1 text-xs">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <button onclick="restartGameRound()" class="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-black rounded-xl shadow-lg shadow-orange-500/30 transition active:scale-95">
+            <i class="fa-solid fa-rotate-right mr-2"></i>再玩一局
+          </button>
+        </div>
+      </div>
+
+      <!-- Right Side Webcam & Debug HUD -->
+      <div class="absolute top-3 right-3 z-20 w-36 sm:w-44 bg-slate-900/85 backdrop-blur-md border border-slate-700/80 rounded-xl p-2 shadow-2xl flex flex-col gap-1.5">
+        <div class="flex items-center justify-between text-[11px] font-bold text-slate-300 px-1">
+          <span class="flex items-center gap-1"><i class="fa-solid fa-video text-cyan-400"></i> AI 視訊監視</span>
+          <span id="aiStatusDot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+        </div>
+
+        <div id="webcamContainer" class="relative rounded-lg overflow-hidden bg-slate-950 min-h-[90px] flex items-center justify-center border border-slate-800">
+          <div id="webcamPlaceholder" class="text-xs text-slate-500 text-center p-2">
+            相機未連線
+          </div>
+        </div>
+
+        <!-- Real-time Prediction Visualizer -->
+        <div id="predictionHUD" class="bg-slate-950/90 rounded-lg p-2 border border-slate-800/80 flex flex-col gap-1 text-[11px]">
+          <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">即時姿勢辨識率</div>
+          <div id="debugProbList" class="flex flex-col gap-1 font-mono text-slate-300">
+            <div class="text-[10px] text-slate-500 italic">尚未開始測量...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Game Canvas -->
+      <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+    </div>
+
+    <!-- Manual Fallback Controls & Instructions -->
+    <div class="px-4 py-3 bg-slate-900 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 z-20 text-xs text-slate-400">
+      <div class="flex items-center gap-2">
+        <span class="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-slate-200 font-mono font-bold">Space / 空白鍵</span>
+        <span>或按鈕手動觸發:</span>
+      </div>
+
+      <div class="flex gap-2">
+        <button onclick="triggerManualAction('throw')" class="px-3 py-1.5 rounded-lg bg-cyan-600/80 hover:bg-cyan-500 text-white font-bold transition active:scale-95 flex items-center gap-1.5">
+          <i class="fa-solid fa-paper-plane"></i> 模擬 THROW (甩竿)
+        </button>
+        <button onclick="triggerManualAction('up')" class="px-3 py-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white font-bold transition active:scale-95 flex items-center gap-1.5">
+          <i class="fa-solid fa-arrow-up text-xs"></i> 模擬 UP (拉竿)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Teachable Machine Pose Model URL
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/UzqfJGlvo/";
+
+    // AI & Pose variables
+    let model, webcam;
+    let isWebcamReady = false;
+
+    // Game Core States: IDLE, CASTING, WAITING, TIMING, RESULT, END
+    let gameState = "IDLE";
+    let score = 0;
+    let highScore = 0;
+    let cooldown = false;
+
+    // 30 Seconds Countdown Timer
+    let timeLeft = 30;
+    let timerInterval = null;
+    let roundStarted = false;
+
+    // Fish Rarity Database
+    const fishDatabase = [
+      { name: "小青魚", score: 100, color: "#38bdf8", bellyColor: "#93c5fd", size: 26 },
+      { name: "小丑魚", score: 250, color: "#f97316", bellyColor: "#fef08a", size: 30 },
+      { name: "金色錦鯉", score: 500, color: "#f59e0b", bellyColor: "#fef08a", size: 36 }
+    ];
+    let currentBitingFish = null;
+
+    // Timing Bar Parameters (Generous & Forgiving)
+    let pointerPos = 0;
+    let pointerSpeed = 0.007; // Smooth slow speed
+    let pointerDirection = 1;
+
+    // Target parameters for timing bar
+    const visualTarget = { start: 0.35, end: 0.65 };   // Green visual bar (30% wide)
+    const logicalHitbox = { start: 0.20, end: 0.80 };  // Wide generous hit zone (60% wide)
+
+    // Elements
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const statusBadge = document.getElementById("statusBadge");
+    const debugProbList = document.getElementById("debugProbList");
+    const aiStatusDot = document.getElementById("aiStatusDot");
+    const scoreText = document.getElementById("scoreText");
+    const highScoreText = document.getElementById("highScoreText");
+    const timerText = document.getElementById("timerText");
+
+    // Dynamic Physics & Visual Objects
+    let canvasW = 800;
+    let canvasH = 500;
+    
+    // Water & Environment Animation State
+    let waveOffset = 0;
+    let clouds = [];
+    let particles = [];
+    let backgroundFish = [];
+
+    // Rod & Reel Animation Object
+    const fishingRod = {
+      angle: -0.1,         // Base rod tilt angle
+      targetAngle: -0.1,
+      bend: 0,             // Rod bend factor when tension is high
+      targetBend: 0,
+      tipX: 0,
+      tipY: 0
+    };
+
+    // Fishing Line & Float Bobber Object
+    const bobber = {
+      x: 520,
+      y: 350,
+      targetY: 350,
+      vy: 0,
+      submerged: false,
+      visible: false
+    };
+
+    // Caught or Target Fish Object
+    const activeFish = {
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      rot: 0,
+      size: 32,
+      data: null,
+      visible: false,
+      state: "swimming" // swimming, caught, fleeing
+    };
+
+    // Resize canvas dynamically
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      canvasW = rect.width;
+      canvasH = rect.height;
+    }
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    function initEnvironment() {
+      // Create random drifting clouds
+      clouds = [];
+      for (let i = 0; i < 5; i++) {
+        clouds.push({
+          x: Math.random() * canvasW,
+          y: 20 + Math.random() * 80,
+          speed: 0.2 + Math.random() * 0.3,
+          scale: 0.8 + Math.random() * 0.6
+        });
+      }
+
+      // Ambient fish swimming in deep sea
+      backgroundFish = [];
+      for (let i = 0; i < 4; i++) {
+        backgroundFish.push({
+          x: Math.random() * canvasW,
+          y: canvasH * 0.7 + Math.random() * (canvasH * 0.25),
+          speed: (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 0.8),
+          size: 14 + Math.random() * 12,
+          color: Math.random() > 0.3 ? "#0284c7" : "#0d9488"
+        });
+      }
+    }
+    initEnvironment();
+
+    async function initGame() {
+      document.getElementById("startOverlay").style.display = "none";
+      updateStatus("載入 AI 姿勢模型與開啟攝影機中...", "fa-circle-notch fa-spin text-amber-400");
+
+      try {
+        const modelURL = MODEL_URL + "model.json";
+        const metadataURL = MODEL_URL + "metadata.json";
+
+        // Load Pose Model
+        model = await tmPose.load(modelURL, metadataURL);
+
+        // Setup Teachable Machine Webcam
+        const size = 180;
+        const flip = true; 
+        webcam = new tmPose.Webcam(size, size, flip);
+        await webcam.setup();
+        await webcam.play();
+
+        // Attach webcam canvas to DOM
+        const webcamBox = document.getElementById("webcamContainer");
+        webcamBox.innerHTML = "";
+        webcamBox.appendChild(webcam.canvas);
+
+        isWebcamReady = true;
+        aiStatusDot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-ping";
+
+        updateStatus("做出【THROW (甩竿)】動作開始 30 秒挑戰！", "fa-bullseye text-cyan-400");
+
+        // Start render loops
+        requestAnimationFrame(gameLoop);
+        predictLoop();
+
+      } catch (err) {
+        console.error("模型開啟失敗:", err);
+        updateStatus("初始化失敗，改以鍵盤/按鈕模式遊玩", "fa-triangle-exclamation text-rose-400");
+        aiStatusDot.className = "w-2 h-2 rounded-full bg-amber-400";
+        requestAnimationFrame(gameLoop);
+      }
+    }
+
+    // Start 30s Countdown Clock
+    function startCountdownTimer() {
+      if (roundStarted) return;
+      roundStarted = true;
+      timeLeft = 30;
+      timerText.innerText = `${timeLeft} 秒`;
+
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        timerText.innerText = `${timeLeft} 秒`;
+
+        if (timeLeft <= 0) {
+          clearInterval(timerInterval);
+          endGameRound();
+        }
+      }, 1000);
+    }
+
+    async function predictLoop() {
+      if (isWebcamReady && gameState !== "END") {
+        webcam.update();
+
+        try {
+          const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+          const prediction = await model.predict(posenetOutput);
+
+          let topClass = "";
+          let topProbability = 0;
+          let debugHTML = "";
+
+          for (let i = 0; i < prediction.length; i++) {
+            const className = prediction[i].className;
+            const prob = prediction[i].probability;
+            const percent = (prob * 100).toFixed(0);
+
+            const isTop = prob > 0.65;
+            debugHTML += `
+              <div class="flex justify-between items-center ${isTop ? 'text-emerald-400 font-bold' : 'text-slate-400'}">
+                <span>${className}</span>
+                <span>${percent}%</span>
+              </div>
+            `;
+
+            if (prob > topProbability) {
+              topProbability = prob;
+              topClass = className;
+            }
+          }
+
+          debugProbList.innerHTML = debugHTML;
+
+          if (topProbability > 0.70) {
+            handleAction(topClass.toLowerCase().trim());
+          }
+        } catch (e) {
+          console.error("AI 辨識異常:", e);
+        }
+      }
+
+      requestAnimationFrame(predictLoop);
+    }
+
+    function handleAction(action) {
+      if (cooldown || gameState === "END") return;
+
+      // 1. Throwing / Casting state trigger
+      if (gameState === "IDLE" && (action.includes("throw") || action === "space")) {
+        startCountdownTimer(); // Trigger 30s timer on first cast
+
+        gameState = "CASTING";
+        updateStatus("甩竿投擲中...", "fa-paper-plane text-cyan-400");
+        
+        fishingRod.targetAngle = 0.35;
+        fishingRod.targetBend = 0.2;
+        triggerCooldown(1000);
+
+        setTimeout(() => {
+          if (gameState === "END") return;
+
+          fishingRod.targetAngle = -0.05;
+          fishingRod.targetBend = 0.05;
+          
+          bobber.visible = true;
+          bobber.x = canvasW * 0.65;
+          bobber.y = canvasH * 0.62;
+          
+          gameState = "WAITING";
+          updateStatus("釣線已拋出，耐心等待魚兒咬鉤...", "fa-hourglass-half text-amber-300 animate-pulse");
+
+          // Pick random fish
+          currentBitingFish = fishDatabase[Math.floor(Math.random() * fishDatabase.length)];
+
+          const waitTime = 1500 + Math.random() * 1800;
+          setTimeout(() => {
+            if (gameState === "WAITING") {
+              startTimingPhase();
+            }
+          }, waitTime);
+
+        }, 800);
+      }
+
+      // 2. Up / Catching state trigger
+      if (gameState === "TIMING" && (action.includes("up") || action === "space")) {
+        triggerCooldown(600);
+
+        if (pointerPos >= logicalHitbox.start && pointerPos <= logicalHitbox.end) {
+          // SUCCESS!
+          gameState = "RESULT";
+          score += currentBitingFish.score;
+          if (score > highScore) highScore = score;
+
+          scoreText.innerText = score + " 分";
+          highScoreText.innerText = highScore + " 分";
+
+          fishingRod.targetAngle = -0.4;
+          fishingRod.targetBend = 0.6;
+          
+          triggerFishSplash(true);
+          updateStatus(`🎉 成功釣起【${currentBitingFish.name}】(+${currentBitingFish.score}分)!`, "fa-trophy text-amber-300");
+
+        } else {
+          // MISSED!
+          gameState = "RESULT";
+          fishingRod.targetAngle = -0.2;
+          fishingRod.targetBend = -0.1;
+
+          triggerFishSplash(false);
+          updateStatus("❌ 哎呀！太早或太晚拉竿，魚跑掉了！", "fa-face-frown text-rose-400");
+        }
+
+        setTimeout(() => {
+          if (gameState === "END") return;
+
+          gameState = "IDLE";
+          bobber.visible = false;
+          activeFish.visible = false;
+          fishingRod.targetAngle = -0.1;
+          fishingRod.targetBend = 0;
+          updateStatus("請做出【THROW (甩竿)】動作繼續釣魚！", "fa-rotate-left text-cyan-400");
+        }, 2200);
+      }
+    }
+
+    function startTimingPhase() {
+      gameState = "TIMING";
+      pointerPos = 0;
+      pointerDirection = 1;
+
+      bobber.targetY = canvasH * 0.65 + 15;
+      
+      activeFish.visible = true;
+      activeFish.data = currentBitingFish;
+      activeFish.x = bobber.x - 80;
+      activeFish.y = canvasH * 0.72;
+      activeFish.state = "swimming";
+
+      createParticles(bobber.x, canvasH * 0.62, 12, "#38bdf8");
+      updateStatus(`🐟 【${currentBitingFish.name}】咬鉤了！於綠區快速做出【UP】動作！`, "fa-exclamation-triangle text-amber-400 animate-bounce");
+    }
+
+    function triggerFishSplash(isSuccess) {
+      activeFish.visible = true;
+      activeFish.x = bobber.x;
+      activeFish.y = canvasH * 0.62;
+
+      if (isSuccess) {
+        activeFish.state = "caught";
+        activeFish.vx = -3.5;
+        activeFish.vy = -9.5;
+        createParticles(bobber.x, canvasH * 0.62, 25, "#fbbf24");
+      } else {
+        activeFish.state = "fleeing";
+        activeFish.vx = 8;
+        activeFish.vy = 2;
+        createParticles(bobber.x, canvasH * 0.62, 15, "#ffffff");
+      }
+    }
+
+    function endGameRound() {
+      gameState = "END";
+      updateStatus("⏱️ 時間結束！戰績結算中...", "fa-flag-checkered text-rose-400");
+      document.getElementById("finalScoreVal").innerText = `${score} 分`;
+      document.getElementById("saveScoreBox").style.display = "flex";
+      renderLeaderboardUI();
+      document.getElementById("resultModal").style.display = "flex";
+    }
+
+    function saveLeaderboardScore() {
+      const name = document.getElementById("playerNameInput").value.trim() || "匿名釣客";
+      let board = JSON.parse(localStorage.getItem("tm_fishing_leaderboard") || "[]");
+
+      board.push({ name, score, date: new Date().toLocaleDateString() });
+      board.sort((a, b) => b.score - a.score);
+      board = board.slice(0, 5); // Keep Top 5
+
+      localStorage.setItem("tm_fishing_leaderboard", JSON.stringify(board));
+      document.getElementById("saveScoreBox").style.display = "none";
+      renderLeaderboardUI();
+    }
+
+    function renderLeaderboardUI() {
+      const board = JSON.parse(localStorage.getItem("tm_fishing_leaderboard") || "[]");
+      const listContainer = document.getElementById("leaderboardList");
+
+      if (board.length === 0) {
+        listContainer.innerHTML = `<div class="text-slate-500 italic p-1">尚無高分紀錄</div>`;
+        return;
+      }
+
+      listContainer.innerHTML = board.map((item, index) => `
+        <div class="flex justify-between items-center py-1 px-2 rounded bg-slate-900 border border-slate-800">
+          <span class="font-bold ${index === 0 ? 'text-amber-400' : 'text-slate-300'}">
+            #${index + 1} ${item.name}
+          </span>
+          <span class="font-mono text-cyan-400 font-bold">${item.score} 分</span>
+        </div>
+      `).join("");
+    }
+
+    function restartGameRound() {
+      score = 0;
+      timeLeft = 30;
+      roundStarted = false;
+      gameState = "IDLE";
+      scoreText.innerText = "0 分";
+      timerText.innerText = "30 秒";
+      bobber.visible = false;
+      activeFish.visible = false;
+      document.getElementById("resultModal").style.display = "none";
+      updateStatus("做出【THROW (甩竿)】動作開始 30 秒挑戰！", "fa-bullseye text-cyan-400");
+    }
+
+    function triggerCooldown(ms) {
+      cooldown = true;
+      setTimeout(() => { cooldown = false; }, ms);
+    }
+
+    function triggerManualAction(type) {
+      handleAction(type);
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (gameState === "IDLE") handleAction("throw");
+        else if (gameState === "TIMING") handleAction("up");
+      }
+    });
+
+    function updateStatus(msg, iconClass) {
+      statusBadge.innerHTML = `<i class="fa-solid ${iconClass}"></i><span>${msg}</span>`;
+    }
+
+    function createParticles(x, y, count, color) {
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x: x,
+          y: y,
+          vx: (Math.random() - 0.5) * 6,
+          vy: -Math.random() * 6 - 2,
+          radius: Math.random() * 4 + 2,
+          color: color,
+          alpha: 1,
+          life: 0.94 + Math.random() * 0.04
+        });
+      }
+    }
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvasW, canvasH);
+      waveOffset += 0.04;
+
+      fishingRod.angle += (fishingRod.targetAngle - fishingRod.angle) * 0.1;
+      fishingRod.bend += (fishingRod.targetBend - fishingRod.bend) * 0.1;
+
+      drawSkyAndScenery();
+      drawOceanAndSeaLife();
+      drawDock();
+      drawFishingRodAndLine();
+      drawBobber();
+      drawActiveFish();
+      updateAndDrawParticles();
+
+      if (gameState === "TIMING") {
+        updateAndDrawTimingBar();
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function drawSkyAndScenery() {
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, canvasH * 0.6);
+      skyGrad.addColorStop(0, "#0284c7");
+      skyGrad.addColorStop(0.6, "#38bdf8");
+      skyGrad.addColorStop(1, "#bae6fd");
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, canvasW, canvasH * 0.6);
+
+      ctx.fillStyle = "#fef08a";
+      ctx.beginPath();
+      ctx.arc(canvasW * 0.2, canvasH * 0.2, 36, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(254, 240, 138, 0.25)";
+      ctx.beginPath();
+      ctx.arc(canvasW * 0.2, canvasH * 0.2, 54, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+      clouds.forEach(cloud => {
+        cloud.x += cloud.speed;
+        if (cloud.x > canvasW + 60) cloud.x = -80;
+
+        ctx.beginPath();
+        ctx.arc(cloud.x, cloud.y, 18 * cloud.scale, 0, Math.PI * 2);
+        ctx.arc(cloud.x + 15 * cloud.scale, cloud.y - 10 * cloud.scale, 22 * cloud.scale, 0, Math.PI * 2);
+        ctx.arc(cloud.x + 35 * cloud.scale, cloud.y, 18 * cloud.scale, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillStyle = "#0284c7";
+      ctx.beginPath();
+      ctx.moveTo(canvasW * 0.45, canvasH * 0.58);
+      ctx.quadraticCurveTo(canvasW * 0.58, canvasH * 0.45, canvasW * 0.72, canvasH * 0.58);
+      ctx.fill();
+
+      ctx.fillStyle = "#0369a1";
+      ctx.beginPath();
+      ctx.moveTo(canvasW * 0.65, canvasH * 0.58);
+      ctx.quadraticCurveTo(canvasW * 0.8, canvasH * 0.42, canvasW * 0.95, canvasH * 0.58);
+      ctx.fill();
+    }
+
+    function drawOceanAndSeaLife() {
+      const waterLevel = canvasH * 0.58;
+
+      const seaGrad = ctx.createLinearGradient(0, waterLevel, 0, canvasH);
+      seaGrad.addColorStop(0, "#0284c7");
+      seaGrad.addColorStop(0.4, "#0369a1");
+      seaGrad.addColorStop(1, "#0c4a6e");
+      ctx.fillStyle = seaGrad;
+      ctx.fillRect(0, waterLevel, canvasW, canvasH - waterLevel);
+
+      backgroundFish.forEach(fish => {
+        fish.x += fish.speed;
+        if (fish.x > canvasW + 40) fish.x = -40;
+        if (fish.x < -40) fish.x = canvasW + 40;
+
+        ctx.fillStyle = fish.color;
+        ctx.beginPath();
+        const dir = fish.speed > 0 ? 1 : -1;
+        ctx.ellipse(fish.x, fish.y, fish.size, fish.size * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(fish.x - fish.size * dir, fish.y);
+        ctx.lineTo(fish.x - (fish.size + 8) * dir, fish.y - 6);
+        ctx.lineTo(fish.x - (fish.size + 8) * dir, fish.y + 6);
+        ctx.closePath();
+        ctx.fill();
+      });
+
+      ctx.fillStyle = "rgba(14, 165, 233, 0.7)";
+      ctx.beginPath();
+      ctx.moveTo(0, canvasH);
+      for (let x = 0; x <= canvasW; x += 15) {
+        const y = Math.sin(x * 0.015 + waveOffset) * 6 + waterLevel;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(canvasW, canvasH);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = "#7dd3fc";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (let x = 0; x <= canvasW; x += 15) {
+        const y = Math.sin(x * 0.015 + waveOffset) * 6 + waterLevel;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    function drawDock() {
+      const dockWidth = canvasW * 0.22;
+      const dockTop = canvasH * 0.52;
+
+      ctx.fillStyle = "#451a03";
+      ctx.fillRect(dockWidth * 0.3, dockTop, 16, canvasH - dockTop);
+      ctx.fillRect(dockWidth * 0.75, dockTop, 16, canvasH - dockTop);
+
+      ctx.fillStyle = "#78350f";
+      ctx.fillRect(0, dockTop, dockWidth, 22);
+
+      ctx.strokeStyle = "#451a03";
+      ctx.lineWidth = 2;
+      for (let x = 12; x < dockWidth; x += 18) {
+        ctx.beginPath();
+        ctx.moveTo(x, dockTop);
+        ctx.lineTo(x, dockTop + 22);
+        ctx.stroke();
+      }
+    }
+
+    function drawFishingRodAndLine() {
+      const handleX = canvasW * 0.12;
+      const handleY = canvasH * 0.51;
+      const rodLength = 160;
+
+      const angle = fishingRod.angle;
+      const rawTipX = handleX + Math.cos(angle - 0.8) * rodLength;
+      const rawTipY = handleY + Math.sin(angle - 0.8) * rodLength;
+
+      const bendX = Math.sin(angle) * fishingRod.bend * 40;
+      const bendY = Math.cos(angle) * fishingRod.bend * 50;
+
+      fishingRod.tipX = rawTipX + bendX;
+      fishingRod.tipY = rawTipY + bendY;
+
+      const ctrlX = (handleX + fishingRod.tipX) / 2 + bendX * 0.5;
+      const ctrlY = (handleY + fishingRod.tipY) / 2 + bendY * 0.5;
+
+      ctx.strokeStyle = "#ea580c";
+      ctx.lineWidth = 6;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(handleX, handleY);
+      ctx.quadraticCurveTo(ctrlX, ctrlY, fishingRod.tipX, fishingRod.tipY);
+      ctx.stroke();
+
+      ctx.strokeStyle = "#d97706";
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.moveTo(handleX - 10, handleY + 5);
+      ctx.lineTo(handleX + 18, handleY - 6);
+      ctx.stroke();
+
+      ctx.fillStyle = "#94a3b8";
+      ctx.beginPath();
+      ctx.arc(handleX + 12, handleY - 2, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (bobber.visible || gameState === "CASTING") {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+        ctx.lineWidth = 1.5;
+
+        let targetLineX = bobber.x;
+        let targetLineY = bobber.y;
+
+        if (activeFish.visible && activeFish.state === "caught") {
+          targetLineX = activeFish.x;
+          targetLineY = activeFish.y;
+        }
+
+        const slack = (gameState === "WAITING") ? 25 : 5;
+        const lineCtrlX = (fishingRod.tipX + targetLineX) / 2;
+        const lineCtrlY = (fishingRod.tipY + targetLineY) / 2 + slack;
+
+        ctx.beginPath();
+        ctx.moveTo(fishingRod.tipX, fishingRod.tipY);
+        ctx.quadraticCurveTo(lineCtrlX, lineCtrlY, targetLineX, targetLineY);
+        ctx.stroke();
+      }
+    }
+
+    function drawBobber() {
+      if (!bobber.visible) return;
+
+      const waterY = Math.sin(bobber.x * 0.015 + waveOffset) * 6 + (canvasH * 0.58);
+      bobber.y += (bobber.targetY - bobber.y) * 0.1;
+      
+      if (gameState === "WAITING") {
+        bobber.targetY = waterY;
+      }
+
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(bobber.x, bobber.y - 6, 7, Math.PI, 0);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(bobber.x, bobber.y - 6, 7, 0, Math.PI);
+      ctx.fill();
+
+      ctx.strokeStyle = "#facc15";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(bobber.x, bobber.y - 13);
+      ctx.lineTo(bobber.x, bobber.y - 18);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(bobber.x, waterY + 2, 14, 4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    function drawActiveFish() {
+      if (!activeFish.visible || !activeFish.data) return;
+
+      if (activeFish.state === "caught") {
+        activeFish.x += activeFish.vx;
+        activeFish.y += activeFish.vy;
+        activeFish.vy += 0.45;
+        activeFish.rot = Math.atan2(activeFish.vy, activeFish.vx);
+      } else if (activeFish.state === "fleeing") {
+        activeFish.x += activeFish.vx;
+        activeFish.y += activeFish.vy;
+        activeFish.rot = 0.2;
+      } else if (activeFish.state === "swimming") {
+        activeFish.x += (bobber.x - activeFish.x) * 0.08;
+        activeFish.y += (bobber.y + 10 - activeFish.y) * 0.08;
+      }
+
+      ctx.save();
+      ctx.translate(activeFish.x, activeFish.y);
+      ctx.rotate(activeFish.rot);
+
+      const fData = activeFish.data;
+      const size = fData.size || 30;
+
+      ctx.fillStyle = fData.color;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size, size * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = fData.bellyColor;
+      ctx.beginPath();
+      ctx.ellipse(0, size * 0.15, size * 0.7, size * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = fData.color;
+      ctx.beginPath();
+      ctx.moveTo(-size, 0);
+      ctx.lineTo(-size - 14, -12);
+      ctx.lineTo(-size - 14, 12);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(size * 0.5, -4, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#000000";
+      ctx.beginPath();
+      ctx.arc(size * 0.5 + 1, -4, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function updateAndDrawParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.2;
+        p.alpha *= p.life;
+
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+
+        if (p.alpha < 0.05) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    function updateAndDrawTimingBar() {
+      pointerPos += pointerSpeed * pointerDirection;
+      if (pointerPos >= 1) {
+        pointerPos = 1;
+        pointerDirection = -1;
+      } else if (pointerPos <= 0) {
+        pointerPos = 0;
+        pointerDirection = 1;
+      }
+
+      const barW = Math.min(460, canvasW * 0.65);
+      const barH = 34;
+      const barX = (canvasW - barW) / 2;
+      const barY = canvasH * 0.22;
+
+      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(barX - 6, barY - 6, barW + 12, barH + 12, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW, barH, 10);
+      ctx.fill();
+
+      const greenX = barX + barW * visualTarget.start;
+      const greenW = barW * (visualTarget.end - visualTarget.start);
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(greenX, barY, greenW, barH);
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
+      ctx.fillRect(greenX, barY, greenW, barH * 0.4);
+
+      const cursorX = barX + barW * pointerPos;
+      
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = "#38bdf8";
+      ctx.shadowBlur = 12;
+      ctx.fillRect(cursorX - 3, barY - 6, 6, barH + 12);
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = "#facc15";
+      ctx.beginPath();
+      ctx.moveTo(cursorX, barY - 10);
+      ctx.lineTo(cursorX - 8, barY - 20);
+      ctx.lineTo(cursorX + 8, barY - 20);
+      ctx.closePath();
+      ctx.fill();
+    }
+  </script>
+</body>
+</html>
